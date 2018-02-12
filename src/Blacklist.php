@@ -71,7 +71,9 @@ class Blacklist
      */
     public function has(Payload $payload)
     {
-        return $this->storage->has($payload['jti']);
+        $exp = Utils::timestamp($payload['exp'])->addMinutes(1);
+        if ($exp->isPast())
+            return $this->storage->has($payload['jti']);
     }
 
     /**
