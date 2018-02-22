@@ -12,6 +12,7 @@
 namespace Tymon\JWTAuth;
 
 use Tymon\JWTAuth\Providers\Storage\StorageInterface;
+use Config;
 
 class Blacklist
 {
@@ -19,7 +20,7 @@ class Blacklist
      * @var \Tymon\JWTAuth\Providers\Storage\StorageInterface
      */
     protected $storage;
-
+    protected $files;
     /**
      * Number of minutes from issue date in which a JWT can be refreshed.
      *
@@ -53,6 +54,20 @@ class Blacklist
             return false;
         }
 
+        /*
+         * blacklist waitlisting keeps getting extended each time we access within 60 seconds
+         * this happens because we keep replacing the blacklisting entry here each time we refresh the token
+         * currently once 60 seconds passes without it being used it is blacklisted properly with no waitlisting
+         * the below code is used to prevent this behavior
+         */
+        $parts = array_slice(str_split($hash = sha1($payload['jti']), 2), 0, 2);
+        $cache_file = config('cache.stores.file.path').'/'.implode('/', $parts).'/'.$hash;
+        if(file_exists($cache_file)) {
+            $cache_file_timestamp = filemtime($cache_file);
+            if(time() - $cache_file_timestamp < 60) {
+                return true;
+            }
+        }
         // Set the cache entry's lifetime to be equal to the amount
         // of refreshable time it has remaining (which is the larger
         // of `exp` and `iat+refresh_ttl`), rounded up a minute
@@ -71,9 +86,19 @@ class Blacklist
      */
     public function has(Payload $payload)
     {
-        $exp = Utils::timestamp($payload['exp'])->addMinutes(1);
-        if ($exp->isPast())
-            return $this->storage->has($payload['jti']);
+        $parts = array_slice(str_split($hash = sha1($payload['jti']), 2), 0, 2);
+        $cache_file = config('cache.stores.file.path').'/'.implode('/', $parts).'/'.$hash;
+        if(file_exists($cache_file)) {
+            $cache_file_timestamp = filemtime($cache_file);
+            $exp = Utils::timestamp($cache_file_timestamp)->addMinutes(1);
+            if ($exp->isPast()) {
+                return $this->storage->has($payload['jti']);
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
     }
 
     /**
